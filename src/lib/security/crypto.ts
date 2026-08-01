@@ -37,7 +37,7 @@ export async function verifyTerraSignature(
     return await crypto.subtle.verify(
       'HMAC',
       keyMaterial,
-      signatureBytes as unknown as ArrayBufferView,
+      signatureBytes as unknown as globalThis.BufferSource,
       new TextEncoder().encode(payload)
     );
   } catch (error) {
