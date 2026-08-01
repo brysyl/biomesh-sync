@@ -4,6 +4,7 @@ let cachedClient: SupabaseClient | null = null;
 
 export function getSupabase(): SupabaseClient {
   if (!cachedClient) {
+    // Fallback placeholders prevent build-time crashes if env vars aren't injected yet
     const supabaseUrl = 
       process.env.NEXT_PUBLIC_SUPABASE_URL || 
       process.env.SUPABASE_URL || 
@@ -14,7 +15,7 @@ export function getSupabase(): SupabaseClient {
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
       process.env.SUPABASE_ANON_KEY || 
       process.env.supabaseKey || 
-      'placeholder-key';
+      'placeholder-key-to-prevent-build-crashes';
 
     cachedClient = createClient(supabaseUrl, supabaseKey);
   }
