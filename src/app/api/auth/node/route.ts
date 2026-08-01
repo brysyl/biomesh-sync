@@ -12,14 +12,16 @@ export async function POST(request: Request) {
 
     const supabase = getSupabase();
     
-    // Optional: store active node mapping if table exists
-    await supabase.from('sync_nodes').insert({
-      user_id: userId,
-      secret_token: secretToken,
-      status: 'active',
-    }).catch(() => {
-      // Graceful fallback if sync_nodes table hasn't been migrated yet
-    });
+    // Graceful fallback block using standard try/catch
+    try {
+      await supabase.from('sync_nodes').insert({
+        user_id: userId,
+        secret_token: secretToken,
+        status: 'active',
+      });
+    } catch (dbError) {
+      console.warn('Sync nodes table not found or insert skipped:', dbError);
+    }
 
     const origin = request.headers.get('origin') || 'https://biomesh.online';
     const webhookUrl = `${origin}/api/webhooks/wearable`;
