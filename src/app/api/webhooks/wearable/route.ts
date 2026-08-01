@@ -1,184 +1,72 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabase } from '@/lib/supabase';
+import { verifyTerraSignature } from '@/lib/security/crypto';
 
-// Force Vercel Edge Runtime for zero cold-start latency and sub-50ms execution
 export const runtime = 'edge';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-/**
- * Production-Ready Edge Webhook Handler for Direct Oura & Garmin Telemetry Streams
- * Endpoint: /api/webhooks
- */
-export async function POST(req: NextRequest) {
+export async function POST(request: Request) {
   try {
-    // Determine provider via custom header or query parameter
-    const provider = req.headers.get('x-wearable-provider') || req.nextUrl.searchParams.get('provider');
-    const rawBody = await req.text();
+    const signatureHeader = request.headers.get('terra-signature') || '';
+    const webhookSecret = process.env.TERRA_WEBHOOK_SECRET;
 
-    if (!rawBody) {
-      return NextResponse.json({ error: 'Empty payload received' }, { status: 400 });
+    if (!webhookSecret) {
+      console.error('Missing TERRA_WEBHOOK_SECRET configuration.');
+      return new Response(JSON.stringify({ error: 'Server configuration error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    const payload = JSON.parse(rawBody);
+    // Parse Terra signature header (Format: t=<timestamp>,v1=<signature>)
+    const elements = signatureHeader.split(',');
+    const timestamp = elements.find((el) => el.startsWith('t='))?.split('=')[1];
+    const v1Sig = elements.find((el) => el.startsWith('v1='))?.split('=')[1];
 
-    let providerUserId: string;
-    let stressScore: number = 0;
-    let hrvMs: number | null = null;
-
-    // Normalize incoming payload schemas based on the direct provider source
-    if (provider === 'oura') {
-      // Oura V2 webhook / daily stress schema structure
-      providerUserId = payload.user_id || payload.data?.id;
-      stressScore = payload.data?.stress_high ?? payload.data?.score ?? 0;
-      hrvMs = payload.data?.rmssd ?? null;
-    } else if (provider === 'garmin') {
-      // Garmin Health API push schema structure
-      providerUserId = payload.userId || payload.summary?.userId;
-      stressScore = payload.summary?.averageStressLevel ?? payload.averageStressLevel ?? 0;
-    } else {
-      return NextResponse.json({ error: 'Unsupported or missing wearable provider header' }, { status: 400 });
+    if (!timestamp || !v1Sig) {
+      return new Response(JSON.stringify({ error: 'Invalid signature headers' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    if (!providerUserId) {
-      return NextResponse.json({ error: 'Provider user ID could not be resolved from payload' }, { status: 422 });
+    const rawBody = await request.text();
+    const signedPayload = `${timestamp}.${rawBody}`;
+
+    // Verify HMAC signature securely on the Edge runtime
+    const isValid = await verifyTerraSignature(signedPayload, v1Sig, webhookSecret);
+    if (!isValid) {
+      return new Response(JSON.stringify({ error: 'Unauthorized signature' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    // Map the provider user identifier to our internal Supabase user ID via wearable_connections
-    const { data: connection, error: dbError } = await supabase
-      .from('wearable_connections')
-      .select('user_id')
-      .eq('provider_user_id', providerUserId)
-      .eq('provider', provider)
-      .single();
+    const eventData = JSON.parse(rawBody);
+    const supabase = getSupabase();
 
-    if (dbError || !connection) {
-      return NextResponse.json({ error: 'No active user mapping found for this provider token' }, { status: 404 });
-    }
-
-    const userId = connection.user_id;
-
-    // Log the incoming biometric event into Supabase asynchronously
-    const { error: insertError } = await supabase.from('biometric_events').insert({
-      user_id: userId,
-      timestamp: new Date().toISOString(),
-      stress_score: stressScore,
-      hrv_ms: hrvMs,
-      raw_payload: payload,
+    // Persist webhook payload data to Supabase
+    const { error: dbError } = await supabase.from('webhook_events').insert({
+      user_id: eventData.user?.user_id,
+      type: eventData.type,
+      payload: eventData,
     });
 
-    if (insertError) {
-      console.error('Supabase telemetry logging failed:', insertError);
+    if (dbError) {
+      console.error('Supabase write error:', dbError);
+      return new Response(JSON.stringify({ error: 'Database persistence error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
-    // Fetch user-specific stress threshold configuration
-    const { data: userData } = await supabase
-      .from('users')
-      .select('stress_threshold')
-      .eq('id', userId)
-      .single();
-
-    const threshold = userData?.stress_threshold || 80;
-
-    // Trigger calendar defense mechanisms if stress crosses the configured threshold
-    if (stressScore >= threshold) {
-      await executeCalendarDefense(userId, stressScore);
-    }
-
-    return NextResponse.json({ status: 'success', processed: true, stress_score: stressScore }, { status: 200 });
-
+    return new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   } catch (error) {
-    console.error('Edge Webhook Execution Error:', error);
-    return NextResponse.json({ error: 'Internal edge server error during telemetry ingestion' }, { status: 500 });
-  }
-}
-
-/**
- * Executes autonomous calendar defense actions or routes to human-in-the-loop review.
- */
-async function executeCalendarDefense(userId: string, stressScore: number) {
-  // Retrieve valid encrypted Google OAuth token for the user from Supabase
-  const token = await getValidGoogleAccessToken(userId);
-  if (!token) return;
-
-  const startTime = new Date();
-  const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1-hour protection window
-
-  const calendarEventPayload = {
-    summary: '🛡️ BioMesh Focus Guard',
-    description: `Autonomous time block generated by BioMesh Sync. Elevated physiological stress score detected: ${stressScore}/100.`,
-    start: { dateTime: startTime.toISOString() },
-    end: { dateTime: endTime.toISOString() },
-  };
-
-  // Direct REST API call to Google Calendar v3
-  const calendarResponse = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(calendarEventPayload),
-  });
-
-  if (calendarResponse.ok) {
-    const calendarData = await calendarResponse.json();
-    await supabase.from('calendar_actions_log').insert({
-      user_id: userId,
-      action_type: 'block_created',
-      google_event_id: calendarData.id,
-      description: `Successfully inserted BioMesh Focus Guard due to stress spike (${stressScore}).`,
+    console.error('Webhook execution failure:', error);
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
     });
-  } else {
-    console.error('Failed to update Google Calendar API:', await calendarResponse.text());
   }
-}
-
-/**
- * Retrieves and refreshes the user's Google OAuth access token securely.
- */
-async function getValidGoogleAccessToken(userId: string): Promise<string | null> {
-  const { data: connection } = await supabase
-    .from('wearable_connections')
-    .select('access_token, refresh_token, token_expires_at')
-    .eq('user_id', userId)
-    .eq('provider', 'google_calendar')
-    .single();
-
-  if (!connection || !connection.access_token) return null;
-
-  const isExpired = new Date(connection.token_expires_at) <= new Date();
-  if (!isExpired) {
-    return connection.access_token;
-  }
-
-  // Token refresh logic via Google OAuth endpoint using Web fetch
-  const response = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID!,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET!,
-      refresh_token: connection.refresh_token,
-      grant_type: 'refresh_token',
-    }),
-  });
-
-  if (!response.ok) return null;
-
-  const tokenData = await response.json();
-  const newAccessToken = tokenData.access_token;
-  const expiresAt = new Date(Date.now() + tokenData.expires_in * 1000).toISOString();
-
-  // Update token cache in Supabase
-  await supabase
-    .from('wearable_connections')
-    .update({ access_token: newAccessToken, token_expires_at: expiresAt })
-    .eq('user_id', userId)
-    .eq('provider', 'google_calendar');
-
-  return newAccessToken;
 }
