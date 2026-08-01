@@ -1,38 +1,24 @@
+// src/app/api/webhooks/wearable/route.ts
 import { getSupabase } from '@/lib/supabase';
-import { verifyTerraSignature } from '@/lib/security/crypto';
+import { verifyWebhookSignature } from '@/lib/security/crypto';
 
 export const runtime = 'edge';
 
 export async function POST(request: Request) {
   try {
-    const signatureHeader = request.headers.get('terra-signature') || '';
-    const webhookSecret = process.env.TERRA_WEBHOOK_SECRET;
+    const signature = request.headers.get('x-biomesh-signature') || '';
+    const webhookSecret = process.env.BIOMESH_WEBHOOK_SECRET;
 
     if (!webhookSecret) {
-      console.error('Missing TERRA_WEBHOOK_SECRET configuration.');
       return new Response(JSON.stringify({ error: 'Server configuration error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Parse Terra signature header (Format: t=<timestamp>,v1=<signature>)
-    const elements = signatureHeader.split(',');
-    const timestamp = elements.find((el) => el.startsWith('t='))?.split('=')[1];
-    const v1Sig = elements.find((el) => el.startsWith('v1='))?.split('=')[1];
-
-    if (!timestamp || !v1Sig) {
-      return new Response(JSON.stringify({ error: 'Invalid signature headers' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
     const rawBody = await request.text();
-    const signedPayload = `${timestamp}.${rawBody}`;
+    const isValid = await verifyWebhookSignature(rawBody, signature, webhookSecret);
 
-    // Verify HMAC signature securely on the Edge runtime
-    const isValid = await verifyTerraSignature(signedPayload, v1Sig, webhookSecret);
     if (!isValid) {
       return new Response(JSON.stringify({ error: 'Unauthorized signature' }), {
         status: 401,
@@ -43,27 +29,32 @@ export async function POST(request: Request) {
     const eventData = JSON.parse(rawBody);
     const supabase = getSupabase();
 
-    // Persist webhook payload data to Supabase
-    const { error: dbError } = await supabase.from('webhook_events').insert({
-      user_id: eventData.user?.user_id,
-      type: eventData.type,
+    const normalizedPayload = {
+      user_id: eventData.user_id,
+      provider: eventData.provider || 'native_client',
+      event_type: eventData.type || 'biometric_sync',
+      heart_rate: eventData.heart_rate || null,
+      hrv: eventData.hrv || null,
+      stress_score: eventData.stress_score || null,
       payload: eventData,
-    });
+    };
+
+    const { error: dbError } = await supabase.from('webhook_events').insert(normalizedPayload);
 
     if (dbError) {
-      console.error('Supabase write error:', dbError);
-      return new Response(JSON.stringify({ error: 'Database persistence error' }), {
+      console.error('Supabase persistence error:', dbError);
+      return new Response(JSON.stringify({ error: 'Database write error' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, sovereignty: 'maintained' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
-    console.error('Webhook execution failure:', error);
+    console.error('Webhook processing failure:', error);
     return new Response(JSON.stringify({ error: 'Internal Server Error' }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
