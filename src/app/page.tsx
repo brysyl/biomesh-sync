@@ -13,6 +13,12 @@ export default function BioMeshDashboard() {
     isLoading: false,
   });
 
+  const [connectionData, setConnectionData] = useState<{
+    webhookUrl?: string;
+    userId?: string;
+    secretToken?: string;
+  } | null>(null);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setTelemetryState((prev) => ({
@@ -24,13 +30,33 @@ export default function BioMeshDashboard() {
   }, []);
 
   const handleInitializeSync = async () => {
-    setTelemetryState((prev) => ({ ...prev, isLoading: true, status: 'INITIALIZING_LOCAL_NODE...' }));
-    
-    // Simulate secure token handshake for self-hosted architecture
-    setTimeout(() => {
-      alert('BioMesh Edge Node Initialized. Ready to ingest direct telemetry streams.');
+    try {
+      setTelemetryState((prev) => ({ ...prev, isLoading: true, status: 'PROVISIONING_NODE...' }));
+      
+      const response = await fetch('/api/auth/node', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: 'executive_alpha_01' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setConnectionData({
+          webhookUrl: data.webhookUrl,
+          userId: data.userId,
+          secretToken: data.secretToken,
+        });
+        setTelemetryState((prev) => ({ ...prev, isLoading: false, status: 'NODE_READY' }));
+      } else {
+        alert('Initialization failed: ' + (data.error || 'Unknown error'));
+        setTelemetryState((prev) => ({ ...prev, isLoading: false }));
+      }
+    } catch (err) {
+      console.error('Network dispatch failure:', err);
+      alert('Failed to communicate with Vercel edge node.');
       setTelemetryState((prev) => ({ ...prev, isLoading: false }));
-    }, 1000);
+    }
   };
 
   return (
@@ -44,7 +70,7 @@ export default function BioMeshDashboard() {
             </span>
           </div>
           <div className="flex items-center space-x-6 text-xs font-mono text-slate-400">
-            <span className="hidden sm:inline">INFRASTRUCTURE: <strong className="text-emerald-400">SELF-HOSTED</strong></span>
+            <span className="hidden sm:inline">INFRASTRUCTURE: <strong className="text-emerald-400">VERCEL EDGE</strong></span>
             <span>LATENCY: <strong className="text-emerald-400">{telemetryState.latencyMs}ms</strong></span>
             <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-semibold">
               {telemetryState.autonomousShields}
@@ -53,7 +79,7 @@ export default function BioMeshDashboard() {
         </div>
       </header>
 
-      <section className="max-w-5xl mx-auto px-6 pt-24 pb-16 text-center">
+      <section className="max-w-5xl mx-auto px-6 pt-20 pb-12 text-center">
         <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-xs font-mono text-slate-300 mb-8 shadow-inner">
           <span className="text-emerald-400">●</span>
           <span>Zero-Licensing Edge Telemetry Engine</span>
@@ -63,25 +89,51 @@ export default function BioMeshDashboard() {
           Turn Real-Time Biometric Stress Into <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-400">Autonomous Calendar Defense</span>.
         </h1>
         
-        <p className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-12 font-normal leading-relaxed">
-          BioMesh Sync connects your biometric stream directly to your schedule with zero subscription fees. When load spikes, our edge engine clears your calendar automatically.
+        <p className="text-lg sm:text-xl text-slate-400 max-w-2xl mx-auto mb-10 font-normal leading-relaxed">
+          BioMesh Sync connects your biometric stream directly to your schedule with zero subscription fees. Generate your secure ingestion endpoint below.
         </p>
 
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto">
+        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-12">
           <button 
             onClick={handleInitializeSync}
             disabled={telemetryState.isLoading}
             className="w-full sm:w-auto px-8 py-3.5 rounded-lg bg-emerald-500 text-slate-950 font-semibold hover:bg-emerald-400 transition-all duration-200 shadow-lg shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
           >
-            {telemetryState.isLoading ? 'Configuring Node...' : 'Initialize Sync Node'}
+            {telemetryState.isLoading ? 'Provisioning Node...' : 'Initialize Sync Node'}
           </button>
-          <a 
-            href="#architecture" 
-            className="w-full sm:w-auto px-8 py-3.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-semibold hover:bg-slate-800 transition-all duration-200"
-          >
-            View System Specs
-          </a>
         </div>
+
+        {connectionData && (
+          <div className="max-w-2xl mx-auto p-6 rounded-xl bg-slate-900/80 border border-emerald-500/30 text-left shadow-2xl backdrop-blur-md animate-fadeIn">
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-xs font-mono text-emerald-400 uppercase tracking-wider font-bold">Secure Node Provisioned</span>
+              <span className="text-xs font-mono text-slate-400">User ID: {connectionData.userId}</span>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-mono text-slate-400 mb-1">DIRECT WEBHOOK URL (POST)</label>
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={connectionData.webhookUrl} 
+                  className="w-full px-3 py-2 rounded bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300 select-all"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono text-slate-400 mb-1">NODE SECRET TOKEN</label>
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={connectionData.secretToken} 
+                  className="w-full px-3 py-2 rounded bg-slate-950 border border-slate-800 text-xs font-mono text-cyan-300 select-all"
+                />
+              </div>
+              <p className="text-xs text-slate-400 pt-2 leading-relaxed">
+                Paste these credentials into any REST-capable mobile health exporter (e.g., Health Auto Export) or device script to stream biometric telemetry straight to your Supabase instance with zero intermediary costs.
+              </p>
+            </div>
+          </div>
+        )}
       </section>
 
       <section id="architecture" className="max-w-6xl mx-auto px-6 py-16 border-t border-slate-900">

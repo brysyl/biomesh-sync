@@ -1,27 +1,16 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 
-let cachedClient: SupabaseClient | null = null;
+// Client-side instantiation (Safe for browser)
+export const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+export const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-function firstNonEmpty(...vals: (string | undefined)[]): string | undefined {
-  return vals.find((v) => typeof v === 'string' && v.trim().length > 0);
-}
+// Admin instantiation (Strictly for server-side / Edge environments)
+// Bypasses RLS for autonomous webhook processing
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-export function getSupabase(): SupabaseClient {
-  if (!cachedClient) {
-    const supabaseUrl =
-      firstNonEmpty(
-        process.env.NEXT_PUBLIC_SUPABASE_URL,
-        process.env.SUPABASE_URL
-      ) || 'https://placeholder.supabase.co';
-
-    const supabaseKey =
-      firstNonEmpty(
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-        process.env.SUPABASE_ANON_KEY,
-        process.env.SUPABASE_SERVICE_ROLE_KEY
-      ) || 'placeholder-key-to-prevent-build-crashes';
-
-    cachedClient = createClient(supabaseUrl, supabaseKey);
+export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false
   }
-  return cachedClient;
-}
+});

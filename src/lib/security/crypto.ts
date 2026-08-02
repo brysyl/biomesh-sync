@@ -1,29 +1,29 @@
-// src/lib/security/crypto.ts
-export async function verifyWebhookSignature(
-  signedPayload: string,
-  signature: string,
-  secret: string
-): Promise<boolean> {
+import crypto from 'crypto';
+
+/**
+ * Validates the HMAC-SHA256 signature of incoming wearable webhooks.
+ * Ensures data integrity and prevents spoofed physiological payloads.
+ */
+export function verifyHmacSignature(payload: string, signature: string, secret: string): boolean {
   try {
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(signedPayload);
+    if (!signature || !secret) return false;
 
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData,
-      { name: 'HMAC', hash: { name: 'SHA-256' } },
-      false,
-      ['sign']
-    );
+    const generatedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(payload)
+      .digest('base64');
+      
+    // Buffer lengths must match exactly for timingSafeEqual
+    const sigBuffer = Buffer.from(signature);
+    const genBuffer = Buffer.from(generatedSignature);
 
-    const signatureBuffer = await crypto.subtle.sign('HMAC', cryptoKey, messageData);
-    const hashArray = Array.from(new Uint8Array(signatureBuffer));
-    const computedSignature = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (sigBuffer.length !== genBuffer.length) {
+      return false;
+    }
 
-    return computedSignature === signature;
+    return crypto.timingSafeEqual(sigBuffer, genBuffer);
   } catch (error) {
-    console.error('Signature verification exception:', error);
+    console.error('Cryptographic validation fault:', error);
     return false;
   }
 }
