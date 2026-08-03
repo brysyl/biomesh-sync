@@ -8,9 +8,20 @@ export async function POST(request: Request) {
     const { provider } = await request.json();
     const supabase = createRouteHandlerClient({ cookies });
 
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session) {
-      return NextResponse.json({ error: 'Unauthorized node connection attempt.' }, { status: 401 });
+    let userId: string;
+
+    // Check for active browser session
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      if (provider === 'mock') {
+        // Frictionless Demo Fallback: Provision a temporary investor node ID for testing
+        userId = 'demo_investor_node_id_999';
+      } else {
+        return NextResponse.json({ error: 'Unauthorized node connection attempt. Please authenticate.' }, { status: 401 });
+      }
+    } else {
+      userId = session.user.id;
     }
 
     let authUrl = '';
@@ -27,10 +38,10 @@ export async function POST(request: Request) {
         authUrl = `https://www.fitbit.com/oauth2/authorize?client_id=${process.env.FITBIT_CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&scope=activity heartrate sleep`;
         break;
       case 'mock':
-        // Developer Bypass: Seeds a local baseline directly for testing the engine without hardware
+        // Seed baseline for the demo node
         await supabaseAdmin.from('user_baselines').upsert({
-          user_id: session.user.id,
-          provider_user_id: `mock_node_${session.user.id}`,
+          user_id: userId,
+          provider_user_id: `mock_node_${userId}`,
           baseline_hrv: 65.0,
           baseline_rhr: 52.0,
           calendar_access_token: 'mock_calendar_token_active'
