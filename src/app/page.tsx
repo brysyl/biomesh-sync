@@ -92,6 +92,18 @@ export default function BioMeshSyncPortal() {
   View Metrics →
 </a>
 
+<div className="flex flex-col sm:flex-row items-center gap-4">
+      {/* Internal link connecting the main page to the portal route (/portal) */}
+      <Link
+        href="/portal"
+        className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold px-6 py-3.5 rounded-xl text-sm transition-colors flex items-center space-x-2 group cursor-pointer shadow-lg shadow-sky-500/10"
+      >
+        <Terminal className="w-4 h-4" />
+        <span>Enter Syndicate Portal</span>
+        <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+      </Link>
+    </div>
+
 
       {/* Footer Security Badge */}
       <footer className="max-w-6xl w-full mx-auto border-t border-slate-900 pt-6 text-xs text-slate-500 flex justify-between">
