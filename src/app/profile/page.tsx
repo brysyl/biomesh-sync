@@ -156,7 +156,6 @@ export default function LeadArchitectProfile() {
       <footer className="border-t border-slate-800/80 py-8 text-center text-xs text-slate-500">
         <p>© 2026 Biomesh.online &bull; All Rights Reserved &bull; Bright Sylvester</p>
       </footer>
-    </mai
-      n>
+    </main>
   );
-        }
+}
