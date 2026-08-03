@@ -75,6 +75,7 @@ export default function BioMeshSyncPortal() {
             {loading ? 'Engaging Node...' : 'Initialize Sync Node (Whoop)'}
           </button>
           
+        
           <button
             onClick={() => handleInitializeNode('mock')}
             disabled={loading}
@@ -86,6 +87,11 @@ export default function BioMeshSyncPortal() {
 
         {error && <p className="text-rose-400 text-sm">{error}</p>}
       </div>
+
+<a href="/metrics" className="text-xs text-emerald-400 hover:underline">
+  View Metrics →
+</a>
+
 
       {/* Footer Security Badge */}
       <footer className="max-w-6xl w-full mx-auto border-t border-slate-900 pt-6 text-xs text-slate-500 flex justify-between">
